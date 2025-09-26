@@ -95,8 +95,9 @@ app.post('/naver-signature', async (req, res) => {
     // BCrypt 해시 생성
     const signature = await bcrypt.hash(passwordWithSecret, salt);
     
-    res.json(
-      signature
+
+    res.send(signature);
+    // res.json(
       // signature: signature,
       // client_id: client_id,
       // timestamp: timestampStr,
@@ -105,7 +106,7 @@ app.post('/naver-signature', async (req, res) => {
       // password_used: password,
       // generated_at: new Date().toISOString(),
       // method: 'bcrypt_with_generated_salt'
-    );
+    // );
 
   } catch (error) {
     console.error('Signature generation error:', error);
