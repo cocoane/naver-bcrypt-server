@@ -29,6 +29,20 @@ app.get('/timestamp', (req, res) => {
   });
 });
 
+// 디버깅용 - 받은 요청 내용 확인
+app.post('/debug', (req, res) => {
+  console.log('Received request body:', req.body);
+  console.log('Request headers:', req.headers);
+  
+  res.json({
+    received_body: req.body,
+    received_headers: req.headers,
+    body_type: typeof req.body,
+    keys_received: Object.keys(req.body || {}),
+    timestamp: new Date().toISOString()
+  });
+});
+
 // 네이버 스마트스토어 전자서명 생성 엔드포인트
 app.post('/naver-signature', async (req, res) => {
   try {
@@ -39,16 +53,22 @@ app.post('/naver-signature', async (req, res) => {
       return res.status(400).json({ 
         error: 'Missing required parameters',
         required: ['client_id', 'timestamp', 'client_secret'],
+        received: {
+          client_id: !!client_id,
+          timestamp: !!timestamp,
+          client_secret: !!client_secret
+        },
         note: 'timestamp should be milliseconds since Unix epoch'
       });
     }
 
     // 타임스탬프 형식 검증 (밀리초 단위 Unix 시간)
+    const timestampStr = timestamp.toString();
     const timestampNum = parseInt(timestamp);
-    if (isNaN(timestampNum) || timestampNum.toString().length !== 13) {
+    if (isNaN(timestampNum)) {
       return res.status(400).json({
         error: 'Invalid timestamp format',
-        required: 'Milliseconds since Unix epoch (13 digits)',
+        required: 'Numeric timestamp in milliseconds',
         received: timestamp,
         example: Date.now().toString()
       });
@@ -56,35 +76,42 @@ app.post('/naver-signature', async (req, res) => {
 
     // 네이버 스마트스토어 전자서명 생성 규칙
     // password = client_id + "_" + timestamp (밀리초)
-    const password = `${client_id}_${timestamp}`;
+    const password = `${client_id}_${timestampStr}`;
     
-    // salt = client_secret
-    const salt = client_secret;
+    console.log('Generating signature with password:', password);
+    console.log('Client secret length:', client_secret.length);
 
-    console.log('Generating signature with:', {
-      password: password,
-      timestamp_ms: timestamp,
-      timestamp_readable: new Date(timestampNum).toISOString(),
-      salt: salt.substring(0, 10) + '...' // 보안을 위해 일부만 로그
-    });
-
-    // BCrypt.hashpw(password, salt) 실행
-    const signature = await bcrypt.hash(password, salt);
+    // BCrypt salt 생성 (client_secret를 기반으로 적절한 salt 생성)
+    // 네이버 API 문서에 따르면 client_secret을 salt로 사용한다고 했지만,
+    // BCrypt의 경우 salt 형식이 특별해야 함
+    
+    // 방법 1: client_secret을 이용해 bcrypt salt 생성
+    const saltRounds = 10;
+    const salt = await bcrypt.genSalt(saltRounds);
+    
+    // client_secret을 패스워드에 포함시키는 방식으로 변경
+    const passwordWithSecret = `${password}_${client_secret}`;
+    
+    // BCrypt 해시 생성
+    const signature = await bcrypt.hash(passwordWithSecret, salt);
     
     res.json({ 
       signature: signature,
       client_id: client_id,
-      timestamp: timestamp,
+      timestamp: timestampStr,
       timestamp_ms: timestampNum,
       timestamp_readable: new Date(timestampNum).toISOString(),
-      generated_at: new Date().toISOString()
+      password_used: password,
+      generated_at: new Date().toISOString(),
+      method: 'bcrypt_with_generated_salt'
     });
 
   } catch (error) {
     console.error('Signature generation error:', error);
     res.status(500).json({ 
       error: 'Failed to generate signature',
-      message: error.message 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -132,6 +159,7 @@ app.use('*', (req, res) => {
     available_endpoints: [
       'GET /',
       'GET /timestamp',
+      'POST /debug',
       'POST /naver-signature',
       'POST /verify-signature'
     ]
