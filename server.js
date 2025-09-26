@@ -14,7 +14,18 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'Naver SmartStore BCrypt Server is running',
+    current_timestamp_ms: Date.now(),
     timestamp: new Date().toISOString()
+  });
+});
+
+// 현재 밀리초 타임스탬프 생성 엔드포인트
+app.get('/timestamp', (req, res) => {
+  const now = Date.now();
+  res.json({
+    timestamp_ms: now,
+    timestamp_readable: new Date(now).toISOString(),
+    note: 'Use timestamp_ms value for Naver signature generation'
   });
 });
 
@@ -27,12 +38,24 @@ app.post('/naver-signature', async (req, res) => {
     if (!client_id || !timestamp || !client_secret) {
       return res.status(400).json({ 
         error: 'Missing required parameters',
-        required: ['client_id', 'timestamp', 'client_secret']
+        required: ['client_id', 'timestamp', 'client_secret'],
+        note: 'timestamp should be milliseconds since Unix epoch'
+      });
+    }
+
+    // 타임스탬프 형식 검증 (밀리초 단위 Unix 시간)
+    const timestampNum = parseInt(timestamp);
+    if (isNaN(timestampNum) || timestampNum.toString().length !== 13) {
+      return res.status(400).json({
+        error: 'Invalid timestamp format',
+        required: 'Milliseconds since Unix epoch (13 digits)',
+        received: timestamp,
+        example: Date.now().toString()
       });
     }
 
     // 네이버 스마트스토어 전자서명 생성 규칙
-    // password = client_id + "_" + timestamp
+    // password = client_id + "_" + timestamp (밀리초)
     const password = `${client_id}_${timestamp}`;
     
     // salt = client_secret
@@ -40,6 +63,8 @@ app.post('/naver-signature', async (req, res) => {
 
     console.log('Generating signature with:', {
       password: password,
+      timestamp_ms: timestamp,
+      timestamp_readable: new Date(timestampNum).toISOString(),
       salt: salt.substring(0, 10) + '...' // 보안을 위해 일부만 로그
     });
 
@@ -50,6 +75,8 @@ app.post('/naver-signature', async (req, res) => {
       signature: signature,
       client_id: client_id,
       timestamp: timestamp,
+      timestamp_ms: timestampNum,
+      timestamp_readable: new Date(timestampNum).toISOString(),
       generated_at: new Date().toISOString()
     });
 
@@ -104,6 +131,7 @@ app.use('*', (req, res) => {
     error: 'Endpoint not found',
     available_endpoints: [
       'GET /',
+      'GET /timestamp',
       'POST /naver-signature',
       'POST /verify-signature'
     ]
